@@ -39,6 +39,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PassFn = Callable[[sqlite3.Connection, dict, "bytes | None"], dict]
+SatisfiedFn = Callable[[dict, dict], bool]
+
+
+def _never_satisfied(row: dict, result: dict) -> bool:
+    return False
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,7 @@ class BackfillPass:
     name: str
     needs_raw_image: bool
     fn: PassFn
+    satisfied: SatisfiedFn = _never_satisfied
 
 
 def _pass_content_sha256(con: sqlite3.Connection, binary_row: dict, raw: bytes | None) -> dict:
@@ -97,6 +103,15 @@ def _pass_analyzer_identity(con: sqlite3.Connection, binary_row: dict, raw: byte
     }
 
 
+def _content_sha256_satisfied(row: dict, result: dict) -> bool:
+    digest = result.get("content_sha256")
+    return bool(digest) and row.get("content_sha256") == digest
+
+
+def _analyzer_identity_satisfied(row: dict, result: dict) -> bool:
+    return all(row.get(column) for column in ("analyzer_version", "processor_spec_hash", "basis_hash"))
+
+
 def _pass_raw_image(con: sqlite3.Connection, binary_row: dict, raw: bytes | None) -> dict:
     """Materialize the raw image and report its hash and size; writes no column.
 
@@ -111,8 +126,10 @@ def _pass_raw_image(con: sqlite3.Connection, binary_row: dict, raw: bytes | None
 
 PASSES: dict[str, BackfillPass] = {
     "raw_image": BackfillPass("raw_image", True, _pass_raw_image),
-    "content_sha256": BackfillPass("content_sha256", True, _pass_content_sha256),
-    "analyzer_identity": BackfillPass("analyzer_identity", False, _pass_analyzer_identity),
+    "content_sha256": BackfillPass("content_sha256", True, _pass_content_sha256, _content_sha256_satisfied),
+    "analyzer_identity": BackfillPass(
+        "analyzer_identity", False, _pass_analyzer_identity, _analyzer_identity_satisfied
+    ),
 }
 
 
@@ -312,7 +329,12 @@ def _run_pass(
 
         if resume:
             existing = _load_receipt(receipt)
-            if isinstance(existing, dict) and existing.get("key") == key:
+            if (
+                isinstance(existing, dict)
+                and existing.get("key") == key
+                and isinstance(existing.get("result"), dict)
+                and step.satisfied(row, existing["result"])
+            ):
                 if not _current_shape(existing):
                     # Same stem, old body (a hashed row receipted before this commit):
                     # rewrite in place so the slug leaves the file.
@@ -323,14 +345,21 @@ def _run_pass(
             if receipt_identity != identity:
                 legacy = _legacy_receipt_path(receipts_dir, step.name, slug)
                 existing = _load_receipt(legacy) if legacy != receipt else None
-                if isinstance(existing, dict) and existing.get("key") == {"pass": step.name, "identity": identity}:
+                if (
+                    isinstance(existing, dict)
+                    and existing.get("key") == {"pass": step.name, "identity": identity}
+                ):
                     # One-way migration: same result, renamed fields, hashed stem; the old file goes.
                     receipt.parent.mkdir(parents=True, exist_ok=True)
                     receipt.write_bytes(_dump(_migrated(existing, key, row, receipt_identity)))
                     legacy.unlink()
-                    counts["resumed"] += 1
-                    entries.append({"identity": receipt_identity, "status": "resumed"})
-                    continue
+                    if (
+                        isinstance(existing.get("result"), dict)
+                        and step.satisfied(row, existing["result"])
+                    ):
+                        counts["resumed"] += 1
+                        entries.append({"identity": receipt_identity, "status": "resumed"})
+                        continue
 
         if raw is None and step.needs_raw_image:
             result = {"status": "skipped", "reason": "no_raw_image"}

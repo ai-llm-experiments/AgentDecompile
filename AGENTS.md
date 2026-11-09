@@ -2,7 +2,8 @@
 
 Operational authority for this repository. [VISION.md](VISION.md) is the charter;
 [STRATEGY.md](STRATEGY.md) is the single recovery pipeline and priority policy.
-Start with [README.md](README.md), [USAGE.md](USAGE.md), the
+New agents start at the [entrypoint](entrypoint/README.md); it routes back here and
+adds no policy. Start with [README.md](README.md), [USAGE.md](USAGE.md), the
 [plans hub](docs/plans/README.md) and [runtime reuse assessment](docs/RUNTIME_REUSE.md).
 Search [documented solutions](docs/solutions/README.md) by module or tag before
 changing MCP/Ghidra integration.
@@ -68,7 +69,7 @@ Vite into a development-preview-only product or replace static /dashboard.
 Recovery package: `src/agentdecompile_recovery/`; companion `scripts/` and
 root-relative `target/` layouts remain compatibility contracts. Entry points
 `agentdecompile-corpus`, `agentdecompile-recover`,
-`agentdecompile-reconstruct` and `scripts/decomp-cli.sh` are implementation
+`agentdecompile-cli reconstruct` and `scripts/decomp-cli.sh` are implementation
 references; operations use the catalog. See [corpus contract](docs/CORPUS_PIPELINE.md)
 and [single-binary reference](docs/CRITICAL_PATH.md).
 
